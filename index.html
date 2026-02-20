@@ -476,6 +476,45 @@
     font-size: 11px;
     color: var(--dim-text);
   }
+  .alert-section-header {
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+    padding: 6px 0 3px;
+    border-bottom: 1px solid rgba(0,229,255,0.15);
+    margin-top: 6px;
+  }
+  .sentiment-bar-wrap {
+    margin: 8px 0;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .sentiment-label {
+    font-size: 10px;
+    color: var(--dim-text);
+    margin-bottom: 4px;
+  }
+  .sentiment-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #222;
+  }
+  .sentiment-bar .bull { background: var(--neon-green); }
+  .sentiment-bar .bear { background: var(--neon-red); }
+  .sentiment-bar-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    margin-top: 2px;
+  }
+  .whale-error {
+    color: var(--dim-text);
+    font-size: 12px;
+    text-align: center;
+    padding: 20px;
+  }
   .alerts-chart-area {
     flex-shrink: 0;
     width: 160px;
@@ -619,7 +658,10 @@
 
       <!-- Whale Alerts Panel -->
       <div class="panel">
-        <div class="panel-title">クジラアラート (モック)</div>
+        <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>🐋 クジラアラート</span>
+          <span id="whaleScanTime" style="font-size:10px;color:var(--dim-text);text-transform:none;letter-spacing:0;"></span>
+        </div>
         <div class="panel-body">
           <div class="alerts-layout">
             <div class="alerts-timeline" id="alertsTimeline"></div>
@@ -649,6 +691,7 @@ let volumeSeries = null;
 let radarChart = null;
 let pieChart = null;
 let refreshTimer = null;
+let whaleRefreshTimer = null;
 
 // ============================================
 // API helpers
@@ -780,11 +823,11 @@ async function showDetail(symbol) {
     setDetailHeader(cached.symbol, cached.name, cached.price, cached.change, cached.changePct, cached.grade || '');
   }
 
-  // Fetch full detail, chart, and alerts in parallel
-  const [detail, chartData, alertsData] = await Promise.all([
+  // Fetch full detail, chart, and whale alerts in parallel
+  const [detail, chartData, whaleData] = await Promise.all([
     fetchJSON(`/api/detail/${symbol}`),
     fetchJSON(`/api/chart/${symbol}?period=${currentPeriod}`),
-    fetchJSON(`/api/alerts/${symbol}`),
+    fetchJSON(`/api/whale-alerts/${symbol}`),
   ]);
 
   if (detail) {
@@ -802,9 +845,15 @@ async function showDetail(symbol) {
     renderCandlestick(chartData.data);
   }
 
-  if (alertsData && alertsData.alerts) {
-    renderAlerts(alertsData.alerts);
-  }
+  renderWhaleAlerts(whaleData);
+
+  // クジラアラート自動更新 (5分ごと)
+  if (whaleRefreshTimer) clearInterval(whaleRefreshTimer);
+  whaleRefreshTimer = setInterval(async () => {
+    if (!currentSymbol) return;
+    const wd = await fetchJSON(`/api/whale-alerts/${currentSymbol}`);
+    renderWhaleAlerts(wd);
+  }, 300000);
 
   // Update watchlist button state
   const btn = document.getElementById('detailWatchBtn');
@@ -839,12 +888,15 @@ function showGrid() {
   document.getElementById('detailView').classList.remove('active');
   document.getElementById('gridView').style.display = '';
   currentSymbol = null;
-  // Destroy chart
   if (lwChart) {
     lwChart.remove();
     lwChart = null;
     candleSeries = null;
     volumeSeries = null;
+  }
+  if (whaleRefreshTimer) {
+    clearInterval(whaleRefreshTimer);
+    whaleRefreshTimer = null;
   }
 }
 
@@ -1122,48 +1174,129 @@ function renderRadarChart(fund) {
 }
 
 // ============================================
-// Whale Alerts
+// Whale Alerts (Whale Radar 連携)
 // ============================================
-function renderAlerts(alerts) {
+function renderWhaleAlerts(data) {
   const timeline = document.getElementById('alertsTimeline');
+  const scanTimeEl = document.getElementById('whaleScanTime');
 
-  timeline.innerHTML = alerts.slice(0, 20).map(a => {
-    const d = new Date(a.timestamp * 1000);
-    const dateStr = d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
-    const timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-    const impactCls = a.impact.toLowerCase();
-    return `
-      <div class="alert-item">
-        <div class="alert-time">${dateStr} ${timeStr}</div>
-        <div class="alert-type ${impactCls}">[${a.impact === 'HIGH' ? '高' : a.impact === 'MEDIUM' ? '中' : '低'}] ${a.type}</div>
-        <div class="alert-desc">${a.description}</div>
-      </div>
-    `;
-  }).join('');
+  // エラーまたは未接続
+  if (!data || data.error) {
+    const msg = data?.error || 'データ取得失敗';
+    timeline.innerHTML = `<div class="whale-error">${msg}<br><span style="font-size:10px;">他のセクションは正常に利用できます</span></div>`;
+    scanTimeEl.textContent = '';
+    renderWhalePie({});
+    return;
+  }
 
-  // Pie chart — type distribution
-  const typeCounts = {};
-  alerts.forEach(a => {
-    typeCounts[a.type] = (typeCounts[a.type] || 0) + 1;
-  });
+  // 最終スキャン時刻
+  if (data.last_scan_at) {
+    try {
+      const d = new Date(data.last_scan_at);
+      scanTimeEl.textContent = '最終スキャン: ' + d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    } catch(e) { scanTimeEl.textContent = ''; }
+  }
 
+  const whaleAlerts = data.whale_alerts || [];
+  const spoofingAlerts = data.spoofing_alerts || [];
+  const insiderAlerts = data.insider_alerts || [];
+  const sentiment = data.sentiment || {};
+  const stats = data.stats || {};
+
+  let html = '';
+
+  // オプション異常セクション
+  if (whaleAlerts.length > 0) {
+    html += `<div class="alert-section-header">── オプション異常 (${whaleAlerts.length}件) ──</div>`;
+    whaleAlerts.forEach(a => {
+      const color = a.sentiment === 'up' ? 'var(--neon-green)' : a.sentiment === 'down' ? 'var(--neon-red)' : 'var(--dim-text)';
+      html += `
+        <div class="alert-item">
+          <div class="alert-time">${a.detected_at || ''}</div>
+          <div style="font-size:11px;color:${color};font-weight:bold;">${a.text_jp || a.type}</div>
+        </div>`;
+    });
+  }
+
+  // 異常板セクション
+  if (spoofingAlerts.length > 0) {
+    html += `<div class="alert-section-header">── 異常板・見せ板 (${spoofingAlerts.length}件) ──</div>`;
+    spoofingAlerts.forEach(a => {
+      html += `
+        <div class="alert-item">
+          <div class="alert-time">${a.detected_at || ''}</div>
+          <div style="font-size:11px;color:var(--neon-orange);font-weight:bold;">${a.text_jp || a.type}</div>
+        </div>`;
+    });
+  }
+
+  // インサイダーセクション
+  if (insiderAlerts.length > 0) {
+    html += `<div class="alert-section-header">── センチメント分析 ──</div>`;
+    insiderAlerts.forEach(a => {
+      if (a.sentiment_text) {
+        const sColor = a.sentiment === 'up' ? 'var(--neon-green)' : a.sentiment === 'down' ? 'var(--neon-red)' : 'var(--dim-text)';
+        html += `
+          <div class="alert-item">
+            <div style="font-size:11px;color:${sColor};">${a.sentiment_text}</div>
+          </div>`;
+      }
+    });
+  }
+
+  // データなし
+  if (whaleAlerts.length === 0 && spoofingAlerts.length === 0 && insiderAlerts.length === 0) {
+    html += `<div class="whale-error">この銘柄のアラートはありません<br><span style="font-size:10px;">次回スキャンで検出される可能性があります</span></div>`;
+  }
+
+  // センチメントバー
+  const upC = sentiment.up || 0;
+  const downC = sentiment.down || 0;
+  const total = upC + downC;
+  if (total > 0) {
+    const bullPct = Math.round((upC / total) * 100);
+    const bearPct = 100 - bullPct;
+    const biasText = sentiment.bias === 'bullish' ? '強気優勢' : sentiment.bias === 'bearish' ? '弱気優勢' : '中立';
+    html += `
+      <div class="sentiment-bar-wrap">
+        <div class="sentiment-label">センチメント: ${biasText}</div>
+        <div class="sentiment-bar">
+          <div class="bull" style="width:${bullPct}%"></div>
+          <div class="bear" style="width:${bearPct}%"></div>
+        </div>
+        <div class="sentiment-bar-labels">
+          <span style="color:var(--neon-green);">強気 ${bullPct}%</span>
+          <span style="color:var(--neon-red);">弱気 ${bearPct}%</span>
+        </div>
+      </div>`;
+  }
+
+  timeline.innerHTML = html;
+
+  // 円グラフ
+  renderWhalePie(stats);
+}
+
+function renderWhalePie(stats) {
   const pieCanvas = document.getElementById('alertsPieCanvas');
   if (pieChart) {
     pieChart.destroy();
     pieChart = null;
   }
 
-  const pieLabels = Object.keys(typeCounts);
-  const pieValues = Object.values(typeCounts);
-  const pieColors = ['#00FF41', '#00E5FF', '#FF8800', '#FF2D6A'];
+  const labels = ['オプション異常', '異常板・見せ板', 'センチメント'];
+  const values = [stats.whale_options || 0, stats.spoofing_walls || 0, stats.insider || 0];
+  const colors = ['#00FF41', '#FF8800', '#00E5FF'];
+
+  if (values.every(v => v === 0)) return;
 
   pieChart = new Chart(pieCanvas, {
     type: 'doughnut',
     data: {
-      labels: pieLabels,
+      labels: labels,
       datasets: [{
-        data: pieValues,
-        backgroundColor: pieColors.slice(0, pieLabels.length),
+        data: values,
+        backgroundColor: colors,
         borderColor: '#1A1A25',
         borderWidth: 2,
       }],

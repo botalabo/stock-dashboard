@@ -20,6 +20,8 @@ import time
 import webbrowser
 from pathlib import Path
 
+import requests as http_requests
+
 import yfinance as yf
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_file
@@ -45,9 +47,12 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
 PORT = int(_env("PORT", "5000"))
 
 DEFAULT_TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
-    "JPM", "V", "JNJ", "WMT", "PG", "MA", "UNH", "HD",
+    "NVDA", "AMD", "SMCI", "PLTR", "ARM", "MSTR", "COIN",
+    "MARA", "TSLA", "SOFI", "RKLB", "GRRR", "DJT", "HOOD",
+    "AAPL", "AMZN", "META", "GOOGL",
 ]
+
+WHALE_RADAR_URL = _env("WHALE_RADAR_API_URL", "")
 
 # ============================================================
 # ウォッチリスト永続化
@@ -480,6 +485,71 @@ def get_alerts(symbol):
         ttl=600,
     )
     return jsonify({"symbol": symbol, "alerts": alerts or []})
+
+
+def _fetch_whale_radar_data() -> dict | None:
+    """Whale Radar API からアラートデータを取得する (キャッシュ付き)。"""
+    if not WHALE_RADAR_URL:
+        return None
+    try:
+        res = http_requests.get(f"{WHALE_RADAR_URL}/api/alerts", timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        log.warning("Whale Radar fetch error: %s", e)
+        return None
+
+
+@app.route("/api/whale-alerts/<ticker>")
+def get_whale_alerts(ticker):
+    """Whale Radar の実データから指定銘柄のアラートを返す。"""
+    ticker = ticker.upper()
+
+    if not WHALE_RADAR_URL:
+        return jsonify({
+            "whale_alerts": [], "spoofing_alerts": [], "insider_alerts": [],
+            "stats": {"whale_options": 0, "spoofing_walls": 0, "insider": 0, "total": 0},
+            "sentiment": {"up": 0, "down": 0, "bias": "neutral"},
+            "error": "Whale Radar未接続",
+        })
+
+    data = _get_cached("whale_radar_all", _fetch_whale_radar_data, ttl=60)
+    if not data:
+        return jsonify({
+            "whale_alerts": [], "spoofing_alerts": [], "insider_alerts": [],
+            "stats": {"whale_options": 0, "spoofing_walls": 0, "insider": 0, "total": 0},
+            "sentiment": {"up": 0, "down": 0, "bias": "neutral"},
+            "error": "Whale Radarからデータ取得失敗",
+        })
+
+    whale_alerts = [a for a in data.get("whale_alerts", []) if a.get("ticker") == ticker]
+    spoofing_alerts = [a for a in data.get("spoofing_alerts", []) if a.get("ticker") == ticker]
+    insider_alerts = data.get("insider_alerts", [])
+
+    stats = {
+        "whale_options": len(whale_alerts),
+        "spoofing_walls": len(spoofing_alerts),
+        "insider": len(insider_alerts),
+        "total": len(whale_alerts) + len(spoofing_alerts) + len(insider_alerts),
+    }
+
+    up_count = len([a for a in whale_alerts if a.get("sentiment") == "up"])
+    down_count = len([a for a in whale_alerts if a.get("sentiment") == "down"])
+
+    return jsonify({
+        "whale_alerts": whale_alerts[-20:],
+        "spoofing_alerts": spoofing_alerts[-20:],
+        "insider_alerts": insider_alerts,
+        "stats": stats,
+        "sentiment": {
+            "up": up_count,
+            "down": down_count,
+            "bias": "bullish" if up_count > down_count else "bearish" if down_count > up_count else "neutral",
+        },
+        "last_scan_at": data.get("last_scan_at", ""),
+        "next_scan_at": data.get("next_scan_at", ""),
+        "is_scanning": data.get("is_scanning", False),
+    })
 
 
 @app.route("/api/watchlist", methods=["GET"])
