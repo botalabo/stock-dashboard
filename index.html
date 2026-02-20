@@ -547,6 +547,84 @@
     50% { opacity: 1; }
   }
 
+  /* ============================================ TICKER CONFIG OVERLAY */
+  .tkcfg-overlay {
+    position: fixed; inset: 0; z-index: 8500;
+    background: rgba(10,10,15,.92);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  .tkcfg-overlay.show { opacity: 1; pointer-events: auto; }
+  .tkcfg-box {
+    background: var(--panel-bg);
+    border: 2px solid var(--neon-cyan);
+    border-radius: 12px;
+    width: 500px; max-width: 95vw; max-height: 85vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 0 40px rgba(0,229,255,.15);
+    overflow: hidden;
+  }
+  .tkcfg-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid #2A2A3A;
+  }
+  .tkcfg-header h3 { font-size: 15px; font-weight: bold; color: var(--neon-green); margin: 0; }
+  .tkcfg-close {
+    font-size: 18px; color: var(--dim-text); cursor: pointer;
+    background: none; border: none;
+    font-family: 'Consolas', 'Courier New', monospace;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .tkcfg-close:hover { color: var(--neon-red); }
+  .tkcfg-add {
+    display: flex; gap: 6px; padding: 10px 16px;
+    border-bottom: 1px solid #2A2A3A; background: rgba(0,255,65,.03);
+  }
+  .tkcfg-add input {
+    flex: 1; padding: 8px 12px; background: var(--card-bg);
+    border: 1px solid #2A2A3A; border-radius: 6px;
+    color: var(--white-text);
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px; text-transform: uppercase; outline: none;
+  }
+  .tkcfg-add input:focus { border-color: var(--neon-green); box-shadow: 0 0 6px rgba(0,255,65,.2); }
+  .tkcfg-add input::placeholder { color: #444; text-transform: none; }
+  .tkcfg-add-btn {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px; font-weight: bold; padding: 8px 18px;
+    border-radius: 6px; cursor: pointer;
+    border: 2px solid var(--neon-green); color: var(--neon-green);
+    background: #002200; white-space: nowrap; transition: background .2s;
+  }
+  .tkcfg-add-btn:hover { background: #003300; }
+  .tkcfg-msg { font-size: 11px; padding: 4px 16px; min-height: 20px; }
+  .tkcfg-msg.ok { color: var(--neon-green); }
+  .tkcfg-msg.err { color: var(--neon-red); }
+  .tkcfg-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; }
+  .tkcfg-list::-webkit-scrollbar { width: 4px; }
+  .tkcfg-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  .tkcfg-item {
+    display: flex; align-items: center; padding: 7px 10px;
+    background: var(--card-bg); border-radius: 6px; margin-bottom: 3px;
+    transition: background .15s;
+  }
+  .tkcfg-item:hover { background: rgba(0,229,255,.04); }
+  .tkcfg-item-name { flex: 1; font-size: 14px; font-weight: bold; color: var(--neon-green); }
+  .tkcfg-del {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px; font-weight: bold; padding: 3px 12px;
+    border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--neon-red); color: var(--neon-red);
+    background: transparent; transition: all .2s; white-space: nowrap;
+  }
+  .tkcfg-del:hover { background: rgba(255,0,64,.15); color: #FF4070; }
+  .tkcfg-count {
+    text-align: center; font-size: 10px; color: var(--dim-text);
+    padding: 6px 0; border-top: 1px solid #2A2A3A;
+  }
+  .tkcfg-count .cy { color: var(--neon-cyan); font-weight: bold; }
+
   /* ============================================ RESPONSIVE */
   @media (max-width: 1024px) {
     .grid-view {
@@ -590,6 +668,7 @@
     >&#x1F40B; クジラレーダー</a>
   </div>
   <div class="header-right">
+    <button class="header-btn" onclick="openTickerConfig()">&#x2699; 銘柄設定</button>
     <button class="header-btn" id="filterAll" onclick="setFilter('all')">すべて</button>
     <button class="header-btn" id="filterWatch" onclick="setFilter('watchlist')">お気に入り</button>
     <span style="font-size:11px;color:var(--dim-text);" id="lastUpdate"></span>
@@ -682,12 +761,31 @@
   </div>
 </div>
 
+<!-- ======== TICKER CONFIG OVERLAY ======== -->
+<div class="tkcfg-overlay" id="tkcfgOverlay" onclick="if(event.target===this)closeTickerConfig()">
+  <div class="tkcfg-box">
+    <div class="tkcfg-header">
+      <h3>&#x2699; 銘柄の追加・削除</h3>
+      <button class="tkcfg-close" onclick="closeTickerConfig()">&#x2715;</button>
+    </div>
+    <div class="tkcfg-add">
+      <input type="text" id="tkcfgInput" placeholder="&#x2795; ティッカーを入力 (例: AAPL)" maxlength="10" autocomplete="off"
+             onkeydown="if(event.key==='Enter')addTickerFromInput()">
+      <button class="tkcfg-add-btn" onclick="addTickerFromInput()">&#x2795; 追加</button>
+    </div>
+    <div class="tkcfg-msg" id="tkcfgMsg"></div>
+    <div class="tkcfg-list" id="tkcfgList"></div>
+    <div class="tkcfg-count" id="tkcfgCount"></div>
+  </div>
+</div>
+
 <script>
 // ============================================
 // State
 // ============================================
 let tickersData = [];
 let watchlist = [];
+let tickerList = [];
 let currentFilter = 'all';
 let currentSort = 'symbol';
 let currentSymbol = null;
@@ -728,6 +826,7 @@ async function loadTickers() {
   }
   tickersData = data.tickers || [];
   watchlist = data.watchlist || [];
+  tickerList = data.tickerList || tickersData.map(t => t.symbol);
   renderGrid();
   document.getElementById('lastUpdate').textContent =
     '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
@@ -1324,6 +1423,97 @@ function renderWhalePie(stats) {
       },
     },
   });
+}
+
+// ============================================
+// Ticker Config Overlay
+// ============================================
+function openTickerConfig() {
+  renderTickerConfigList();
+  document.getElementById('tkcfgMsg').textContent = '';
+  document.getElementById('tkcfgMsg').className = 'tkcfg-msg';
+  document.getElementById('tkcfgInput').value = '';
+  document.getElementById('tkcfgOverlay').classList.add('show');
+  document.getElementById('tkcfgInput').focus();
+}
+
+function closeTickerConfig() {
+  document.getElementById('tkcfgOverlay').classList.remove('show');
+}
+
+function renderTickerConfigList() {
+  const list = document.getElementById('tkcfgList');
+  list.innerHTML = '';
+  for (const sym of tickerList) {
+    const item = document.createElement('div');
+    item.className = 'tkcfg-item';
+    item.innerHTML =
+      '<span class="tkcfg-item-name">' + sym + '</span>' +
+      '<button class="tkcfg-del" data-sym="' + sym + '">\u2715 削除</button>';
+    item.querySelector('.tkcfg-del').onclick = function() { removeTickerConfig(sym); };
+    list.appendChild(item);
+  }
+  document.getElementById('tkcfgCount').innerHTML =
+    '監視中: <span class="cy">' + tickerList.length + '</span> 銘柄';
+}
+
+async function addTickerFromInput() {
+  const input = document.getElementById('tkcfgInput');
+  const ticker = input.value.trim().toUpperCase();
+  if (!ticker) return;
+  const msg = document.getElementById('tkcfgMsg');
+  msg.textContent = ticker + ' を追加中...';
+  msg.className = 'tkcfg-msg';
+  try {
+    const res = await fetch(API + '/api/tickers/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      tickerList = data.tickerList;
+      msg.textContent = '\u2705 ' + ticker + ' を追加しました';
+      msg.className = 'tkcfg-msg ok';
+      input.value = '';
+      renderTickerConfigList();
+      loadTickers();
+    } else {
+      msg.textContent = '\u26A0 ' + (data.error || '追加失敗');
+      msg.className = 'tkcfg-msg err';
+    }
+  } catch (e) {
+    msg.textContent = '\u274C 接続エラー';
+    msg.className = 'tkcfg-msg err';
+  }
+}
+
+async function removeTickerConfig(sym) {
+  const msg = document.getElementById('tkcfgMsg');
+  msg.textContent = sym + ' を削除中...';
+  msg.className = 'tkcfg-msg';
+  try {
+    const res = await fetch(API + '/api/tickers/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker: sym }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      tickerList = data.tickerList;
+      msg.textContent = '\u2705 ' + sym + ' を削除しました';
+      msg.className = 'tkcfg-msg ok';
+      renderTickerConfigList();
+      tickersData = tickersData.filter(t => t.symbol !== sym);
+      renderGrid();
+    } else {
+      msg.textContent = '\u26A0 ' + (data.error || '削除失敗');
+      msg.className = 'tkcfg-msg err';
+    }
+  } catch (e) {
+    msg.textContent = '\u274C 接続エラー';
+    msg.className = 'tkcfg-msg err';
+  }
 }
 
 // ============================================

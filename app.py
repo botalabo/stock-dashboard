@@ -55,6 +55,31 @@ DEFAULT_TICKERS = [
 WHALE_RADAR_URL = _env("WHALE_RADAR_API_URL", "")
 
 # ============================================================
+# ティッカーリスト永続化
+# ============================================================
+_TICKERS_FILE = _DATA_DIR / "tickers.json"
+
+
+def _load_tickers() -> list[str]:
+    if _TICKERS_FILE.exists():
+        try:
+            data = json.loads(_TICKERS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list) and data:
+                return data
+        except Exception:
+            pass
+    return list(DEFAULT_TICKERS)
+
+
+def _save_tickers(tl: list[str]) -> None:
+    _TICKERS_FILE.write_text(
+        json.dumps(tl, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+active_tickers: list[str] = _load_tickers()
+
+# ============================================================
 # ウォッチリスト永続化
 # ============================================================
 _WATCHLIST_FILE = _DATA_DIR / "watchlist.json"
@@ -397,7 +422,7 @@ def _extract_price_from_info(symbol: str, info: dict) -> dict:
 @app.route("/api/tickers")
 def get_tickers():
     results = []
-    for i, sym in enumerate(DEFAULT_TICKERS):
+    for i, sym in enumerate(active_tickers):
         info = _get_cached(
             f"info:{sym}",
             lambda s=sym: _fetch_ticker_info(s),
@@ -413,9 +438,9 @@ def get_tickers():
             })
         else:
             results.append({"symbol": sym, "name": sym, "price": 0, "change": 0, "changePct": 0, "grade": ""})
-        if f"info:{sym}" not in _cache and i < len(DEFAULT_TICKERS) - 1:
+        if f"info:{sym}" not in _cache and i < len(active_tickers) - 1:
             time.sleep(0.5)
-    return jsonify({"tickers": results, "watchlist": watchlist})
+    return jsonify({"tickers": results, "watchlist": watchlist, "tickerList": active_tickers})
 
 
 @app.route("/api/detail/<symbol>")
@@ -550,6 +575,39 @@ def get_whale_alerts(ticker):
         "next_scan_at": data.get("next_scan_at", ""),
         "is_scanning": data.get("is_scanning", False),
     })
+
+
+@app.route("/api/tickers/add", methods=["POST"])
+def add_ticker():
+    global active_tickers
+    body = request.get_json()
+    ticker = (body.get("ticker") or "").strip().upper()
+
+    if not ticker or len(ticker) > 10:
+        return jsonify({"ok": False, "error": "無効なティッカー"}), 400
+
+    if ticker in active_tickers:
+        return jsonify({"ok": False, "error": f"{ticker} は既に登録されています"})
+
+    active_tickers.append(ticker)
+    _save_tickers(active_tickers)
+    log.info("銘柄追加: %s (合計 %d 銘柄)", ticker, len(active_tickers))
+    return jsonify({"ok": True, "tickerList": active_tickers})
+
+
+@app.route("/api/tickers/remove", methods=["POST"])
+def remove_ticker():
+    global active_tickers
+    body = request.get_json()
+    ticker = (body.get("ticker") or "").strip().upper()
+
+    if ticker not in active_tickers:
+        return jsonify({"ok": False, "error": f"{ticker} はリストにありません"})
+
+    active_tickers = [s for s in active_tickers if s != ticker]
+    _save_tickers(active_tickers)
+    log.info("銘柄削除: %s (残り %d 銘柄)", ticker, len(active_tickers))
+    return jsonify({"ok": True, "tickerList": active_tickers})
 
 
 @app.route("/api/watchlist", methods=["GET"])
