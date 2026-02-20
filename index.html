@@ -578,9 +578,16 @@
 
 <!-- ============================================ HEADER -->
 <div class="header">
-  <div style="display:flex;align-items:center;">
+  <div style="display:flex;align-items:center;gap:10px;">
     <span class="header-title">STOCK DASHBOARD</span>
     <span class="header-subtitle">ファンダメンタルズ & クジラ活動</span>
+    <a href="https://whale-radar-web-production.up.railway.app" target="_blank" rel="noopener"
+       style="font-size:11px; padding:3px 10px; border:1px solid #00e5ff; border-radius:6px;
+              color:#00e5ff; text-decoration:none; white-space:nowrap;
+              transition:background 0.2s, color 0.2s;"
+       onmouseover="this.style.background='#00e5ff';this.style.color='#000'"
+       onmouseout="this.style.background='transparent';this.style.color='#00e5ff'"
+    >&#x1F40B; クジラレーダー</a>
   </div>
   <div class="header-right">
     <button class="header-btn" id="filterAll" onclick="setFilter('all')">すべて</button>
@@ -1331,6 +1338,21 @@ function startRefresh() {
 // Init
 // ============================================
 startRefresh();
+
+// URLパラメータ ?ticker=XXX で直接銘柄詳細を開く
+(async function() {
+  const params = new URLSearchParams(window.location.search);
+  const ticker = (params.get('ticker') || '').toUpperCase();
+  if (ticker) {
+    // データ読み込み完了を待ってから詳細を開く
+    const wait = () => new Promise(resolve => {
+      const check = () => tickersData.length > 0 ? resolve() : setTimeout(check, 200);
+      check();
+    });
+    await wait();
+    showDetail(ticker);
+  }
+})();
 </script>
 </body>
 </html>
