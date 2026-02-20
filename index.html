@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Dashboard — Botalab</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  /* ============================================
+     Cyberpunk Palette — whale-radar 準拠
+     ============================================ */
+  :root {
+    --neon-green:  #00FF41;
+    --neon-cyan:   #00E5FF;
+    --neon-red:    #FF0040;
+    --neon-yellow: #FFE600;
+    --neon-orange: #FF8800;
+    --neon-pink:   #FF2D6A;
+    --dark-bg:     #0A0A0F;
+    --panel-bg:    #111118;
+    --card-bg:     #1A1A25;
+    --dim-text:    #556677;
+    --white-text:  #E0E0E0;
+    --price-up:    #00FF41;
+    --price-down:  #FF0040;
+    --price-flat:  #888888;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--dark-bg);
+    color: var(--white-text);
+    font-family: 'Consolas', 'Courier New', monospace;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Grid overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      linear-gradient(rgba(0,229,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,.025) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none; z-index: 0;
+  }
+  /* Scanlines */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,.035) 2px, rgba(0,0,0,.035) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+
+  /* ============================================ HEADER */
+  .header {
+    position: relative; z-index: 1;
+    background: var(--panel-bg);
+    border-bottom: 1px solid rgba(0,229,255,0.15);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+    text-shadow: 0 0 10px rgba(0,229,255,0.3);
+  }
+  .header-subtitle {
+    font-size: 11px;
+    color: var(--dim-text);
+    margin-left: 12px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header-btn {
+    background: transparent;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .header-btn:hover {
+    background: rgba(0,229,255,0.15);
+    box-shadow: 0 0 8px rgba(0,229,255,0.3);
+  }
+  .header-btn.active {
+    background: rgba(0,229,255,0.2);
+    box-shadow: 0 0 10px rgba(0,229,255,0.4);
+  }
+
+  /* ============================================ MAIN AREA */
+  .main-area {
+    position: relative; z-index: 1;
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  /* ============================================ GRID VIEW */
+  .grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .ticker-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(0,229,255,0.1);
+    border-radius: 4px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .ticker-card:hover {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 15px rgba(0,229,255,0.15);
+    transform: translateY(-2px);
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .card-symbol {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+  }
+  .card-grade {
+    font-size: 13px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 3px;
+    min-width: 28px;
+    text-align: center;
+  }
+  .grade-A { background: rgba(0,255,65,0.2); color: var(--neon-green); border: 1px solid var(--neon-green); }
+  .grade-B { background: rgba(0,229,255,0.2); color: var(--neon-cyan); border: 1px solid var(--neon-cyan); }
+  .grade-C { background: rgba(255,230,0,0.2); color: var(--neon-yellow); border: 1px solid var(--neon-yellow); }
+  .grade-D { background: rgba(255,136,0,0.2); color: var(--neon-orange); border: 1px solid var(--neon-orange); }
+  .grade-E { background: rgba(255,0,64,0.2); color: var(--neon-red); border: 1px solid var(--neon-red); }
+  .card-name {
+    font-size: 11px;
+    color: var(--dim-text);
+    margin-bottom: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-price {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  .card-change {
+    font-size: 13px;
+    font-weight: bold;
+  }
+  .card-watchstar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    opacity: 0.3;
+    transition: opacity 0.2s;
+    z-index: 2;
+  }
+  .card-watchstar:hover { opacity: 0.7; }
+  .card-watchstar.watched { opacity: 1; color: var(--neon-yellow); }
+  .up { color: var(--price-up); }
+  .down { color: var(--price-down); }
+  .flat { color: var(--price-flat); }
+
+  /* ============================================ FILTER BAR */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    background: transparent;
+    border: 1px solid rgba(0,229,255,0.3);
+    color: var(--dim-text);
+    padding: 3px 10px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .filter-btn:hover { color: var(--neon-cyan); border-color: var(--neon-cyan); }
+  .filter-btn.active { color: var(--neon-cyan); border-color: var(--neon-cyan); background: rgba(0,229,255,0.1); }
+  .filter-label {
+    font-size: 11px;
+    color: var(--dim-text);
+    margin-right: 4px;
+  }
+
+  /* ============================================ DETAIL VIEW */
+  .detail-view {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+  }
+  .detail-view.active {
+    display: flex;
+  }
+  .detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .back-btn {
+    background: transparent;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .back-btn:hover {
+    background: rgba(0,229,255,0.15);
+  }
+  .detail-symbol {
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+    text-shadow: 0 0 10px rgba(0,229,255,0.3);
+  }
+  .detail-name {
+    font-size: 14px;
+    color: var(--dim-text);
+  }
+  .detail-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-left: auto;
+  }
+  .detail-price {
+    font-size: 26px;
+    font-weight: bold;
+  }
+  .detail-change {
+    font-size: 15px;
+    font-weight: bold;
+  }
+  .detail-grade-badge {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 4px 14px;
+    border-radius: 4px;
+  }
+  .detail-watch-btn {
+    background: transparent;
+    border: 1px solid var(--neon-yellow);
+    color: var(--neon-yellow);
+    padding: 4px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: all 0.2s;
+  }
+  .detail-watch-btn.watched {
+    opacity: 1;
+    background: rgba(255,230,0,0.15);
+  }
+
+  /* ============================================ DETAIL PANELS */
+  .detail-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+  }
+  .panel {
+    background: var(--card-bg);
+    border: 1px solid rgba(0,229,255,0.1);
+    border-radius: 4px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .panel-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+  }
+  .panel-body {
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+  }
+
+  /* ============================================ CHART PANEL */
+  #chartContainer {
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+  }
+  .period-btns {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+  }
+  .period-btn {
+    background: transparent;
+    border: 1px solid rgba(0,229,255,0.3);
+    color: var(--dim-text);
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .period-btn:hover { color: var(--neon-cyan); border-color: var(--neon-cyan); }
+  .period-btn.active { color: var(--neon-cyan); border-color: var(--neon-cyan); background: rgba(0,229,255,0.15); }
+
+  /* ============================================ INFO PANEL */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+  }
+  .info-item {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .info-label {
+    font-size: 10px;
+    color: var(--dim-text);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .info-value {
+    font-size: 13px;
+    color: var(--white-text);
+    font-weight: bold;
+  }
+  .info-summary {
+    font-size: 11px;
+    color: var(--dim-text);
+    line-height: 1.5;
+    margin-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    padding-top: 8px;
+  }
+
+  /* ============================================ RADAR PANEL */
+  .radar-wrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    height: 100%;
+    overflow: auto;
+  }
+  .radar-chart-area {
+    flex: 1;
+    min-width: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .radar-chart-area canvas {
+    max-width: 260px;
+    max-height: 260px;
+  }
+  .score-card {
+    flex-shrink: 0;
+    width: 150px;
+  }
+  .score-total {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .score-total-num {
+    font-size: 36px;
+    font-weight: bold;
+    color: var(--neon-cyan);
+    text-shadow: 0 0 15px rgba(0,229,255,0.4);
+  }
+  .score-total-label {
+    font-size: 10px;
+    color: var(--dim-text);
+  }
+  .score-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 11px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    white-space: nowrap;
+  }
+  .score-cat { color: var(--dim-text); }
+  .score-val { color: var(--neon-green); font-weight: bold; min-width: 30px; text-align: right; }
+  .score-detail {
+    font-size: 10px;
+    color: var(--dim-text);
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    line-height: 1.6;
+  }
+  .score-detail-item {
+    margin-bottom: 4px;
+  }
+  .score-detail-label {
+    color: var(--neon-cyan);
+    font-weight: bold;
+  }
+
+  /* ============================================ ALERTS PANEL */
+  .alerts-layout {
+    display: flex;
+    gap: 12px;
+    height: 100%;
+  }
+  .alerts-timeline {
+    flex: 1;
+    overflow-y: auto;
+    min-width: 0;
+  }
+  .alert-item {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .alert-time {
+    font-size: 10px;
+    color: var(--dim-text);
+  }
+  .alert-type {
+    font-size: 11px;
+    font-weight: bold;
+    margin: 2px 0;
+  }
+  .alert-type.high { color: var(--neon-red); }
+  .alert-type.medium { color: var(--neon-orange); }
+  .alert-type.low { color: var(--neon-yellow); }
+  .alert-desc {
+    font-size: 11px;
+    color: var(--dim-text);
+  }
+  .alerts-chart-area {
+    flex-shrink: 0;
+    width: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .alerts-chart-area canvas {
+    max-width: 150px;
+    max-height: 150px;
+  }
+
+  /* ============================================ LOADING */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10,10,15,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .loading-spinner {
+    color: var(--neon-cyan);
+    font-size: 14px;
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* ============================================ RESPONSIVE */
+  @media (max-width: 1024px) {
+    .grid-view {
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    }
+    .detail-panels {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+    }
+    .panel { min-height: 250px; }
+    .radar-wrap { flex-direction: column; }
+    .score-card { width: 100%; }
+    .alerts-layout { flex-direction: column; }
+    .alerts-chart-area { width: 100%; height: 160px; }
+  }
+  @media (max-width: 600px) {
+    .grid-view {
+      grid-template-columns: 1fr;
+    }
+    .header { padding: 8px 12px; }
+    .header-title { font-size: 14px; }
+    .detail-header { flex-direction: column; align-items: flex-start; }
+    .detail-price-row { margin-left: 0; }
+    .info-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================ HEADER -->
+<div class="header">
+  <div style="display:flex;align-items:center;">
+    <span class="header-title">STOCK DASHBOARD</span>
+    <span class="header-subtitle">ファンダメンタルズ & クジラ活動</span>
+  </div>
+  <div class="header-right">
+    <button class="header-btn" id="filterAll" onclick="setFilter('all')">すべて</button>
+    <button class="header-btn" id="filterWatch" onclick="setFilter('watchlist')">お気に入り</button>
+    <span style="font-size:11px;color:var(--dim-text);" id="lastUpdate"></span>
+  </div>
+</div>
+
+<!-- ============================================ MAIN -->
+<div class="main-area" id="mainArea">
+
+  <!-- GRID VIEW -->
+  <div id="gridView">
+    <div class="filter-bar">
+      <span class="filter-label">並び替え:</span>
+      <button class="filter-btn active" id="sortSymbol" onclick="setSort('symbol')">銘柄</button>
+      <button class="filter-btn" id="sortChange" onclick="setSort('change')">変動率</button>
+      <button class="filter-btn" id="sortGrade" onclick="setSort('grade')">グレード</button>
+    </div>
+    <div class="grid-view" id="tickerGrid">
+      <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--neon-cyan);">
+        <div class="loading-spinner" style="font-size:16px;">銘柄データを取得中...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAIL VIEW -->
+  <div class="detail-view" id="detailView">
+    <div class="detail-header">
+      <button class="back-btn" onclick="showGrid()">← 戻る</button>
+      <span class="detail-symbol" id="detailSymbol"></span>
+      <span class="detail-name" id="detailName"></span>
+      <span class="detail-grade-badge" id="detailGradeBadge"></span>
+      <button class="detail-watch-btn" id="detailWatchBtn" onclick="toggleWatchDetail()">★ 登録</button>
+      <div class="detail-price-row">
+        <span class="detail-price" id="detailPrice"></span>
+        <span class="detail-change" id="detailChange"></span>
+      </div>
+    </div>
+
+    <div class="detail-panels">
+      <!-- Chart Panel -->
+      <div class="panel">
+        <div class="panel-title">株価チャート</div>
+        <div class="period-btns">
+          <button class="period-btn" onclick="setPeriod('1mo')">1M</button>
+          <button class="period-btn active" onclick="setPeriod('3mo')">3M</button>
+          <button class="period-btn" onclick="setPeriod('6mo')">6M</button>
+          <button class="period-btn" onclick="setPeriod('1y')">1Y</button>
+          <button class="period-btn" onclick="setPeriod('2y')">2Y</button>
+        </div>
+        <div class="panel-body">
+          <div id="chartContainer"></div>
+        </div>
+      </div>
+
+      <!-- Company Info Panel -->
+      <div class="panel">
+        <div class="panel-title">企業情報</div>
+        <div class="panel-body" id="infoPanel"></div>
+      </div>
+
+      <!-- Fundamentals Radar Panel -->
+      <div class="panel">
+        <div class="panel-title">ファンダメンタルズ</div>
+        <div class="panel-body">
+          <div class="radar-wrap">
+            <div class="radar-chart-area">
+              <canvas id="radarCanvas"></canvas>
+            </div>
+            <div class="score-card" id="scoreCard"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Whale Alerts Panel -->
+      <div class="panel">
+        <div class="panel-title">クジラアラート (モック)</div>
+        <div class="panel-body">
+          <div class="alerts-layout">
+            <div class="alerts-timeline" id="alertsTimeline"></div>
+            <div class="alerts-chart-area">
+              <canvas id="alertsPieCanvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================
+// State
+// ============================================
+let tickersData = [];
+let watchlist = [];
+let currentFilter = 'all';
+let currentSort = 'symbol';
+let currentSymbol = null;
+let currentPeriod = '3mo';
+let lwChart = null;
+let candleSeries = null;
+let volumeSeries = null;
+let radarChart = null;
+let pieChart = null;
+let refreshTimer = null;
+
+// ============================================
+// API helpers
+// ============================================
+const API = '';
+
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(API + url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('Fetch error:', url, e);
+    return null;
+  }
+}
+
+// ============================================
+// Grid View
+// ============================================
+async function loadTickers() {
+  const data = await fetchJSON('/api/tickers');
+  if (!data) {
+    document.getElementById('tickerGrid').innerHTML =
+      '<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--neon-red);">API接続に失敗しました。再試行中...</div>';
+    return;
+  }
+  tickersData = data.tickers || [];
+  watchlist = data.watchlist || [];
+  renderGrid();
+  document.getElementById('lastUpdate').textContent =
+    '最終更新: ' + new Date().toLocaleTimeString('ja-JP');
+}
+
+function renderGrid() {
+  const grid = document.getElementById('tickerGrid');
+  let items = [...tickersData];
+
+  // Filter
+  if (currentFilter === 'watchlist') {
+    items = items.filter(t => watchlist.includes(t.symbol));
+  }
+
+  // Sort
+  if (currentSort === 'symbol') {
+    items.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  } else if (currentSort === 'change') {
+    items.sort((a, b) => b.changePct - a.changePct);
+  } else if (currentSort === 'grade') {
+    const order = { A: 0, B: 1, C: 2, D: 3, E: 4, '': 5 };
+    items.sort((a, b) => (order[a.grade] ?? 5) - (order[b.grade] ?? 5));
+  }
+
+  grid.innerHTML = items.map(t => {
+    const cls = t.changePct > 0 ? 'up' : t.changePct < 0 ? 'down' : 'flat';
+    const sign = t.changePct > 0 ? '+' : '';
+    const isWatched = watchlist.includes(t.symbol);
+    const gradeCls = t.grade ? `grade-${t.grade}` : '';
+    return `
+      <div class="ticker-card" onclick="showDetail('${t.symbol}')">
+        <span class="card-watchstar ${isWatched ? 'watched' : ''}"
+              onclick="event.stopPropagation(); toggleWatch('${t.symbol}')">★</span>
+        <div class="card-header">
+          <span class="card-symbol">${t.symbol}</span>
+          ${t.grade ? `<span class="card-grade ${gradeCls}">${t.grade}</span>` : ''}
+        </div>
+        <div class="card-name">${t.name}</div>
+        <div class="card-price ${cls}">${t.price > 0 ? '$' + t.price.toFixed(2) : '<span style="color:var(--dim-text)">取得中...</span>'}</div>
+        <div class="card-change ${cls}">${t.price > 0 ? sign + t.change.toFixed(2) + ' (' + sign + t.changePct.toFixed(2) + '%)' : ''}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ============================================
+// Filter & Sort
+// ============================================
+function setFilter(f) {
+  currentFilter = f;
+  document.getElementById('filterAll').classList.toggle('active', f === 'all');
+  document.getElementById('filterWatch').classList.toggle('active', f === 'watchlist');
+  renderGrid();
+}
+
+function setSort(s) {
+  currentSort = s;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.id === 'sort' + s.charAt(0).toUpperCase() + s.slice(1));
+  });
+  renderGrid();
+}
+
+// ============================================
+// Watchlist
+// ============================================
+async function toggleWatch(symbol) {
+  const action = watchlist.includes(symbol) ? 'remove' : 'add';
+  const data = await fetchJSON('/api/watchlist');  // pre-check
+  await fetch(API + '/api/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol, action }),
+  });
+  const res = await fetchJSON('/api/watchlist');
+  if (res) watchlist = res.watchlist;
+  renderGrid();
+}
+
+function toggleWatchDetail() {
+  if (!currentSymbol) return;
+  toggleWatch(currentSymbol).then(() => {
+    const btn = document.getElementById('detailWatchBtn');
+    btn.classList.toggle('watched', watchlist.includes(currentSymbol));
+    btn.textContent = watchlist.includes(currentSymbol) ? '★ 登録済' : '★ 登録';
+  });
+}
+
+// ============================================
+// Detail View
+// ============================================
+async function showDetail(symbol) {
+  currentSymbol = symbol;
+  document.getElementById('gridView').style.display = 'none';
+  document.getElementById('detailView').classList.add('active');
+
+  // Set header immediately with cached data
+  const cached = tickersData.find(t => t.symbol === symbol);
+  if (cached) {
+    setDetailHeader(cached.symbol, cached.name, cached.price, cached.change, cached.changePct, cached.grade || '');
+  }
+
+  // Fetch full detail, chart, and alerts in parallel
+  const [detail, chartData, alertsData] = await Promise.all([
+    fetchJSON(`/api/detail/${symbol}`),
+    fetchJSON(`/api/chart/${symbol}?period=${currentPeriod}`),
+    fetchJSON(`/api/alerts/${symbol}`),
+  ]);
+
+  if (detail) {
+    setDetailHeader(
+      detail.symbol, detail.name,
+      detail.price || (cached && cached.price) || 0,
+      detail.change || 0, detail.changePct || 0,
+      detail.fundamentals?.grade || ''
+    );
+    renderInfoPanel(detail);
+    renderRadarChart(detail.fundamentals);
+  }
+
+  if (chartData && chartData.data) {
+    renderCandlestick(chartData.data);
+  }
+
+  if (alertsData && alertsData.alerts) {
+    renderAlerts(alertsData.alerts);
+  }
+
+  // Update watchlist button state
+  const btn = document.getElementById('detailWatchBtn');
+  btn.classList.toggle('watched', watchlist.includes(symbol));
+  btn.textContent = watchlist.includes(symbol) ? '★ 登録済' : '★ 登録';
+}
+
+function setDetailHeader(symbol, name, price, change, changePct, grade) {
+  document.getElementById('detailSymbol').textContent = symbol;
+  document.getElementById('detailName').textContent = name;
+
+  const priceEl = document.getElementById('detailPrice');
+  const changeEl = document.getElementById('detailChange');
+  const cls = changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'flat';
+  const sign = changePct > 0 ? '+' : '';
+  priceEl.textContent = '$' + price.toFixed(2);
+  priceEl.className = 'detail-price ' + cls;
+  changeEl.textContent = `${sign}${change.toFixed(2)} (${sign}${changePct.toFixed(2)}%)`;
+  changeEl.className = 'detail-change ' + cls;
+
+  const badge = document.getElementById('detailGradeBadge');
+  if (grade) {
+    badge.textContent = grade;
+    badge.className = `detail-grade-badge grade-${grade}`;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function showGrid() {
+  document.getElementById('detailView').classList.remove('active');
+  document.getElementById('gridView').style.display = '';
+  currentSymbol = null;
+  // Destroy chart
+  if (lwChart) {
+    lwChart.remove();
+    lwChart = null;
+    candleSeries = null;
+    volumeSeries = null;
+  }
+}
+
+// ============================================
+// Period switch
+// ============================================
+async function setPeriod(period) {
+  currentPeriod = period;
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase().replace(' ', '') === period);
+  });
+  if (!currentSymbol) return;
+  const chartData = await fetchJSON(`/api/chart/${currentSymbol}?period=${period}`);
+  if (chartData && chartData.data) {
+    renderCandlestick(chartData.data);
+  }
+}
+
+// ============================================
+// Candlestick Chart (Lightweight Charts)
+// ============================================
+function renderCandlestick(data) {
+  const container = document.getElementById('chartContainer');
+
+  if (lwChart) {
+    lwChart.remove();
+    lwChart = null;
+  }
+
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div style="color:var(--dim-text);text-align:center;padding:40px;">チャートデータなし</div>';
+    return;
+  }
+
+  lwChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight,
+    layout: {
+      background: { color: '#1A1A25' },
+      textColor: '#556677',
+      fontFamily: "'Consolas', monospace",
+      fontSize: 11,
+    },
+    grid: {
+      vertLines: { color: 'rgba(0,229,255,0.05)' },
+      horzLines: { color: 'rgba(0,229,255,0.05)' },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+    },
+    rightPriceScale: {
+      borderColor: 'rgba(0,229,255,0.15)',
+    },
+    timeScale: {
+      borderColor: 'rgba(0,229,255,0.15)',
+      timeVisible: true,
+    },
+  });
+
+  candleSeries = lwChart.addCandlestickSeries({
+    upColor: '#00FF41',
+    downColor: '#FF0040',
+    borderUpColor: '#00FF41',
+    borderDownColor: '#FF0040',
+    wickUpColor: '#00FF41',
+    wickDownColor: '#FF0040',
+  });
+
+  candleSeries.setData(data.map(d => ({
+    time: d.time,
+    open: d.open,
+    high: d.high,
+    low: d.low,
+    close: d.close,
+  })));
+
+  volumeSeries = lwChart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+  });
+
+  lwChart.priceScale('volume').applyOptions({
+    scaleMargins: { top: 0.8, bottom: 0 },
+  });
+
+  volumeSeries.setData(data.map(d => ({
+    time: d.time,
+    value: d.volume,
+    color: d.close >= d.open ? 'rgba(0,255,65,0.3)' : 'rgba(255,0,64,0.3)',
+  })));
+
+  lwChart.timeScale().fitContent();
+
+  // Resize observer
+  const ro = new ResizeObserver(() => {
+    if (lwChart) {
+      lwChart.applyOptions({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+    }
+  });
+  ro.observe(container);
+}
+
+// ============================================
+// Company Info Panel
+// ============================================
+function renderInfoPanel(detail) {
+  const panel = document.getElementById('infoPanel');
+
+  function fmt(val, suffix = '') {
+    if (val === null || val === undefined) return 'N/A';
+    if (typeof val === 'number') {
+      if (Math.abs(val) >= 1e12) return (val / 1e12).toFixed(2) + 'T' + suffix;
+      if (Math.abs(val) >= 1e9) return (val / 1e9).toFixed(2) + 'B' + suffix;
+      if (Math.abs(val) >= 1e6) return (val / 1e6).toFixed(2) + 'M' + suffix;
+      return val.toFixed(2) + suffix;
+    }
+    return val + suffix;
+  }
+
+  function pct(val) {
+    if (val === null || val === undefined) return 'N/A';
+    return (val * 100).toFixed(2) + '%';
+  }
+
+  const items = [
+    ['セクター', detail.sector],
+    ['業種', detail.industry],
+    ['時価総額', fmt(detail.marketCap)],
+    ['企業価値(EV)', fmt(detail.enterpriseValue)],
+    ['P/E (実績)', fmt(detail.trailingPE)],
+    ['P/E (予想)', fmt(detail.forwardPE)],
+    ['P/B', fmt(detail.priceToBook)],
+    ['配当利回り', pct(detail.dividendYield)],
+    ['52週 高値', '$' + fmt(detail.fiftyTwoWeekHigh)],
+    ['52週 安値', '$' + fmt(detail.fiftyTwoWeekLow)],
+    ['平均出来高', fmt(detail.averageVolume)],
+    ['Beta', fmt(detail.beta)],
+    ['利益率', pct(detail.profitMargins)],
+    ['ROE', pct(detail.returnOnEquity)],
+    ['売上成長率', pct(detail.revenueGrowth)],
+    ['利益成長率', pct(detail.earningsGrowth)],
+    ['D/E比率', fmt(detail.debtToEquity)],
+    ['流動比率', fmt(detail.currentRatio)],
+  ];
+
+  panel.innerHTML = `
+    <div class="info-grid">
+      ${items.map(([label, value]) => `
+        <div class="info-item">
+          <span class="info-label">${label}</span>
+          <span class="info-value">${value}</span>
+        </div>
+      `).join('')}
+    </div>
+    ${detail.longBusinessSummary ? `<div class="info-summary">${detail.longBusinessSummary}</div>` : ''}
+  `;
+}
+
+// ============================================
+// Radar Chart (Chart.js)
+// ============================================
+function renderRadarChart(fund) {
+  if (!fund) return;
+
+  const canvas = document.getElementById('radarCanvas');
+  if (radarChart) {
+    radarChart.destroy();
+    radarChart = null;
+  }
+
+  const cats = fund.categories || {};
+  const labels = ['収益性', '成長性', '健全性', 'バリュー', 'モメンタム'];
+  const keys = ['profitability', 'growth', 'health', 'value', 'momentum'];
+  const values = keys.map(k => cats[k] || 0);
+
+  radarChart = new Chart(canvas, {
+    type: 'radar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Score',
+        data: values,
+        backgroundColor: 'rgba(0,229,255,0.15)',
+        borderColor: '#00FF41',
+        borderWidth: 2,
+        pointBackgroundColor: '#00E5FF',
+        pointBorderColor: '#00FF41',
+        pointRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        r: {
+          beginAtZero: true,
+          max: 100,
+          ticks: {
+            stepSize: 20,
+            color: '#556677',
+            backdropColor: 'transparent',
+            font: { size: 10, family: "'Consolas', monospace" },
+          },
+          grid: {
+            color: 'rgba(0,229,255,0.1)',
+          },
+          angleLines: {
+            color: 'rgba(0,229,255,0.1)',
+          },
+          pointLabels: {
+            color: '#E0E0E0',
+            font: { size: 11, family: "'Consolas', monospace" },
+          },
+        },
+      },
+    },
+  });
+
+  // Score card
+  const card = document.getElementById('scoreCard');
+  const gradeClass = fund.grade ? `grade-${fund.grade}` : '';
+  const reasons = fund.reasons || {};
+
+  const catLabelsJP = {
+    profitability: '収益性',
+    growth: '成長性',
+    health: '健全性',
+    value: 'バリュー',
+    momentum: 'モメンタム',
+  };
+  const weightLabels = {
+    profitability: '25%',
+    growth: '25%',
+    health: '20%',
+    value: '15%',
+    momentum: '15%',
+  };
+
+  card.innerHTML = `
+    <div class="score-total">
+      <div class="score-total-num">${fund.score}</div>
+      <div class="score-total-label">/ 100</div>
+      <div class="card-grade ${gradeClass}" style="display:inline-block;margin-top:6px;font-size:20px;">
+        ${fund.grade}
+      </div>
+    </div>
+    ${keys.map((k, i) => `
+      <div class="score-row">
+        <span class="score-cat">${labels[i]} <span style="color:#444;font-size:9px;">(${weightLabels[k]})</span></span>
+        <span class="score-val">${(cats[k] || 0).toFixed(0)}</span>
+      </div>
+    `).join('')}
+    <div class="score-detail">
+      <div style="color:var(--neon-cyan);font-weight:bold;margin-bottom:4px;">スコア根拠</div>
+      ${keys.map(k => {
+        const r = reasons[k] || {};
+        const entries = Object.entries(r).filter(([_, v]) => v !== 'N/A');
+        if (entries.length === 0) return '';
+        return `<div class="score-detail-item">
+          <span class="score-detail-label">${catLabelsJP[k]}:</span>
+          ${entries.map(([label, val]) => `${label} ${val}`).join(' / ')}
+        </div>`;
+      }).join('')}
+      <div style="margin-top:6px;color:#445566;font-size:9px;">
+        A≥80 B≥60 C≥40 D≥20 E&lt;20
+      </div>
+    </div>
+  `;
+}
+
+// ============================================
+// Whale Alerts
+// ============================================
+function renderAlerts(alerts) {
+  const timeline = document.getElementById('alertsTimeline');
+
+  timeline.innerHTML = alerts.slice(0, 20).map(a => {
+    const d = new Date(a.timestamp * 1000);
+    const dateStr = d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' });
+    const timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const impactCls = a.impact.toLowerCase();
+    return `
+      <div class="alert-item">
+        <div class="alert-time">${dateStr} ${timeStr}</div>
+        <div class="alert-type ${impactCls}">[${a.impact === 'HIGH' ? '高' : a.impact === 'MEDIUM' ? '中' : '低'}] ${a.type}</div>
+        <div class="alert-desc">${a.description}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Pie chart — type distribution
+  const typeCounts = {};
+  alerts.forEach(a => {
+    typeCounts[a.type] = (typeCounts[a.type] || 0) + 1;
+  });
+
+  const pieCanvas = document.getElementById('alertsPieCanvas');
+  if (pieChart) {
+    pieChart.destroy();
+    pieChart = null;
+  }
+
+  const pieLabels = Object.keys(typeCounts);
+  const pieValues = Object.values(typeCounts);
+  const pieColors = ['#00FF41', '#00E5FF', '#FF8800', '#FF2D6A'];
+
+  pieChart = new Chart(pieCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: pieLabels,
+      datasets: [{
+        data: pieValues,
+        backgroundColor: pieColors.slice(0, pieLabels.length),
+        borderColor: '#1A1A25',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#E0E0E0',
+            font: { size: 9, family: "'Consolas', monospace" },
+            padding: 6,
+            boxWidth: 10,
+          },
+        },
+      },
+    },
+  });
+}
+
+// ============================================
+// Auto-refresh
+// ============================================
+function startRefresh() {
+  loadTickers();
+  refreshTimer = setInterval(loadTickers, 15000);
+}
+
+// ============================================
+// Init
+// ============================================
+startRefresh();
+</script>
+</body>
+</html>
